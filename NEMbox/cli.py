@@ -251,12 +251,12 @@ def _format_search_results(items: list[dict[str, Any]], search_type: str) -> str
             lines.append(_format_song_line(item))
         elif search_type == "artist":
             lines.append(
-                f"{item.get('artist_id', '?')}\t{item.get('artist_name', '?')}"
+                f"{item.get('artist_id', '?')}\t{item.get('artists_name', '?')}"
             )
         elif search_type == "album":
             lines.append(
-                f"{item.get('album_id', '?')}\t{item.get('album_name', '?')} "
-                f"— {item.get('artist', '?')}"
+                f"{item.get('album_id', '?')}\t{item.get('albums_name', '?')} "
+                f"— {item.get('artists_name', '?')}"
             )
         elif search_type == "playlist":
             lines.append(
