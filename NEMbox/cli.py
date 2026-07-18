@@ -652,6 +652,10 @@ def cmd_play(api: NetEase, ctx: CliContext, ns: argparse.Namespace) -> int:
     else:
         return _rpc(ctx, ns, "player.play", {}, human_fn=_format_status)
 
+    failed = _ensure_daemon(ctx, ns)
+    if failed is not None:
+        return failed
+
     for method, params in [
         ("queue.clear", {}),
         ("queue.add", {"ids": ids}),
@@ -1257,9 +1261,7 @@ def _build_control_parsers(sub: Any) -> None:
     p_download.add_argument(
         "--path", type=str, default=".", help="目标目录（默认为当前目录）"
     )
-    p_download.add_argument(
-        "--limit", type=int, default=None, help="获取数量上限（仅对 --artist 生效）"
-    )
+    p_download.add_argument("--limit", type=int, default=None, help="获取数量上限")
     p_download.set_defaults(handler="download")
 
     p_play = sub.add_parser(
@@ -1288,9 +1290,7 @@ def _build_control_parsers(sub: Any) -> None:
     p_play.add_argument(
         "--songs", type=int, nargs="+", default=None, help="歌曲 ID 列表，播放指定歌曲"
     )
-    p_play.add_argument(
-        "--limit", type=int, default=None, help="获取数量上限，仅对 --artist 生效"
-    )
+    p_play.add_argument("--limit", type=int, default=None, help="获取数量上限")
     p_play.set_defaults(handler="play")
 
     # simple controls
