@@ -647,6 +647,9 @@ class Player:
                 self.stop()
             elif copyright_issue_flag:
                 self._advance_on_playback_failure()
+            elif frame_cnt == 0:
+                self.stop()
+                self.playing_flag = False
             else:
                 self.next()
 

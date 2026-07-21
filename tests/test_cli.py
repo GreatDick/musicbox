@@ -20,14 +20,57 @@ class FakeNetEase:
             ]
         }
 
+    def artists(self, artist_id):
+        return [
+            {
+                "id": 33894312,
+                "name": "邂逅",
+                "ar": [{"name": "周杰伦"}],
+                "al": {"name": "范特西", "id": 1},
+                "dt": 273000,
+            },
+            {
+                "id": 1847408145,
+                "name": "不能说的秘密",
+                "ar": [{"name": "周杰伦"}],
+                "al": {"name": "不能说的秘密", "id": 2},
+                "dt": 280000,
+            },
+        ]
+
+    def album(self, album_id):
+        return [
+            {
+                "id": 33894312,
+                "name": "邂逅",
+                "ar": [{"name": "周杰伦"}],
+                "al": {"name": "范特西", "id": 1},
+                "dt": 273000,
+            },
+        ]
+
     def dig_info(self, data, dig_type):
         if dig_type == "songs":
-            return [
+            songs = []
+            for item in data or []:
+                sid = item.get("id") if isinstance(item, dict) else item
+                if sid:
+                    songs.append(
+                        {
+                            "song_id": sid,
+                            "song_name": f"song_{sid}",
+                            "artist": f"artist_{sid}"[:10],
+                            "album_name": f"album_{sid}"[:10],
+                            "mp3_url": "http://example.com/song.mp3",
+                        }
+                    )
+            return songs or [
                 {
                     "song_id": 33894312,
                     "song_name": "邂逅",
                     "artist": "周杰伦",
                     "album_name": "范特西",
+                    "mp3_url": "http://example.com/song.mp3",
                 }
             ]
         if dig_type == "artists":
@@ -98,6 +141,28 @@ class FakeNetEase:
 
     def get_version(self):
         return {"info": {"version": "9.9.9"}}
+
+
+class NoUrlNetEase(FakeNetEase):
+    """Fake that returns songs with no mp3_url (download all fail)."""
+
+    def dig_info(self, data, dig_type):
+        if dig_type == "songs":
+            songs = []
+            for item in data or []:
+                sid = item.get("id") if isinstance(item, dict) else item
+                if sid:
+                    songs.append(
+                        {
+                            "song_id": sid,
+                            "song_name": f"song_{sid}",
+                            "artist": "artist",
+                            "album_name": "album",
+                            "mp3_url": "",
+                        }
+                    )
+            return songs
+        return FakeNetEase.dig_info(self, data, dig_type)
 
 
 class LoggedInNetEase(FakeNetEase):
@@ -460,3 +525,122 @@ def test_cli_entry_dispatches_from_main(monkeypatch):
         main_mod.start()
     assert exc.value.code == 0
     assert called["argv"] == ["search", "test", "--json"]
+
+
+def test_play_dry_run_artist_no_side_effect(monkeypatch, capsys):
+    fake = _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = cli.main(["play", "--artist", "6452", "--dry-run", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"][0]["method"] == "queue.clear"
+    assert payload["data"][1]["method"] == "queue.add"
+    assert payload["data"][2]["method"] == "player.play"
+    assert fake.calls == []
+    assert fake.spawned is False
+
+
+def test_play_dry_run_album_no_side_effect(monkeypatch, capsys):
+    fake = _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = cli.main(["play", "--album", "32311", "--dry-run", "--json"])
+    assert code == 0
+    assert fake.calls == []
+    assert fake.spawned is False
+
+
+def test_play_dry_run_songs_no_side_effect(monkeypatch, capsys):
+    fake = _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = cli.main(
+        ["play", "--songs", "33894312", "1847408145", "--dry-run", "--json"]
+    )
+    assert code == 0
+    assert fake.calls == []
+    assert fake.spawned is False
+
+
+def test_play_conflicting_flags_rejected(monkeypatch, capsys):
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = cli.main(["play", "--id", "33894312", "--artist", "6452", "--json"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert (
+        "not allowed with" in err or "mutually exclusive" in err or "conflicting" in err
+    )
+
+
+class FakeResponse:
+    """Mock requests.Response for download tests."""
+
+    def __init__(self, ok=True):
+        self.ok = ok
+        self.status_code = 200 if ok else 403
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise Exception("HTTP Error")
+
+    def iter_content(self, chunk_size=8192):
+        return iter([b"fake audio data"])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+def test_download_artist_success(monkeypatch, capsys):
+    monkeypatch.setattr(cli.requests, "get", lambda url, **kw: FakeResponse(True))
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = _run(monkeypatch, ["download", "--artist", "6452", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert len(payload["data"]) == 2
+    assert payload["data"][0]["ok"] is True
+
+
+def test_download_album_success(monkeypatch, capsys):
+    monkeypatch.setattr(cli.requests, "get", lambda url, **kw: FakeResponse(True))
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = _run(monkeypatch, ["download", "--album", "32311", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["data"][0]["ok"] is True
+
+
+def test_download_songs_success(monkeypatch, capsys):
+    monkeypatch.setattr(cli.requests, "get", lambda url, **kw: FakeResponse(True))
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = _run(monkeypatch, ["download", "--songs", "33894312", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_download_playlist_success(monkeypatch, capsys):
+    monkeypatch.setattr(cli.requests, "get", lambda url, **kw: FakeResponse(True))
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = _run(monkeypatch, ["download", "--playlist", "12345", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_download_conflicting_flags_rejected(monkeypatch, capsys):
+    _patch_daemon(monkeypatch, FakeDaemon(running=False))
+    code = cli.main(["download", "--artist", "6452", "--album", "32311", "--json"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert (
+        "not allowed with" in err or "mutually exclusive" in err or "conflicting" in err
+    )
+
+
+def test_download_all_fail_exit_nonzero(monkeypatch, capsys):
+    monkeypatch.setattr(cli.requests, "get", lambda url, **kw: FakeResponse(True))
+    code = _run(monkeypatch, ["download", "--artist", "6452", "--json"], NoUrlNetEase)
+    assert code != 0
+    err = json.loads(capsys.readouterr().err)
+    assert err["ok"] is False
+    assert err["error"]["type"] == "download_failed"
